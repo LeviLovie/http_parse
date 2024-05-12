@@ -18,8 +18,16 @@ impl Header {
 	&self.name
     }
 
+    pub fn set_name(&mut self, name: String) {
+	self.name = name;
+    }
+
     pub fn value(&self) -> &String {
 	&self.value
+    }
+
+    pub fn set_value(&mut self, value: String) {
+	self.value = value;
     }
 }
 
@@ -39,9 +47,17 @@ impl Query {
     pub fn name(&self) -> &String {
 	&self.name
     }
+
+    pub fn set_name(&mut self, name: String) {
+	self.name = name;
+    }
     
     pub fn value(&self) -> &String {
 	&self.value
+    }
+
+    pub fn set_value(&mut self, value: String) {
+	self.value = value;
     }
 }
 
@@ -82,6 +98,7 @@ pub struct Request {
     full_path: String,
     path: String,
     initialized: bool,
+    version: String,
 }
 impl fmt::Display for Request {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -112,7 +129,7 @@ impl fmt::Display for Request {
 	    body_str.push_str(&format!("\""));
 	}
 	
-        write!(f, "\x1B[1mRequest:\x1B[0m\n  {} {}\n{}{}{}", self.method, self.path, headers, query_str, body_str)
+        write!(f, "\x1B[1mRequest:\x1B[0m\n  {} {} {}\n{}{}{}", self.method, self.path, self.version, headers, query_str, body_str)
     }
 }
 impl Request {
@@ -124,7 +141,8 @@ impl Request {
 	    method: Method::GET,
 	    path: String::new(),
 	    full_path: String::new(),
-	    initialized: false,
+	    version: "HTTP/1.1".to_string(),
+	    initialized: false,	    
 	}
     }
 
@@ -149,11 +167,45 @@ impl Request {
 	&self.body
     }
 
+    pub fn set_body(&mut self, body: &str) {
+	self.initialized = true;
+	self.body = body.to_string();
+    }
+
+    pub fn version(&self) -> &String {
+	if !self.initialized {
+	    warn!("Request version read not initialized");
+	}
+	&self.version
+    }
+
+    pub fn set_version(&mut self, version: &str) {
+	self.initialized = true;
+	self.version = version.to_string();
+    }
+
     pub fn method(&self) -> &Method {
 	if !self.initialized {
 	    warn!("Request method read not initialized");
 	}
 	&self.method
+    }
+
+    pub fn set_method(&mut self, method: Method) {
+	self.initialized = true;
+	self.method = method;
+    }
+
+    pub fn full_path(&self) -> &String {
+	if !self.initialized {
+	    warn!("Request full path read not initialized");
+	}
+	&self.full_path
+    }
+
+    pub fn set_full_path(&mut self, full_path: String) {
+	self.initialized = true;
+	self.full_path = full_path;
     }
 
     pub fn path(&self) -> &String {
@@ -163,6 +215,11 @@ impl Request {
 	&self.path
     }
 
+    pub fn set_path(&mut self, path: &str) {
+	self.initialized = true;
+	self.path = path.to_string();
+    }
+
     pub fn find_header(&self, name: &str) -> Option<&Header> {
 	if !self.initialized {
 	    warn!("Request headers read not initialized");
@@ -170,11 +227,49 @@ impl Request {
 	self.headers.iter().find(|header| header.name().to_lowercase() == name.to_lowercase())
     }
 
+    pub fn set_header(&mut self, header_name: &str, header_value: &str) {
+	self.initialized = true;
+	if self.headers.iter().any(|header| header.name().to_lowercase() == header_name.to_lowercase()) {
+	    let header: &mut Header = self.headers.iter_mut().find(|header| header.name().to_lowercase() == header_name.to_lowercase()).unwrap();
+	    header.set_value(header_value.to_string());
+	} else {
+	    self.headers.push(Header::new(header_name.to_string(), header_value.to_string()));
+	}
+    }
+
+    pub fn add_header(&mut self, header_name: &str, header_value: &str) {
+	self.initialized = true;
+	if self.headers.iter().any(|h| h.name().to_lowercase() == header_name.to_lowercase()) {
+	    self.set_header(header_name, header_value);
+	    return;
+	}
+	self.headers.push(Header::new(header_name.to_string(), header_value.to_string()));
+    }
+
     pub fn find_query(&self, name: &str) -> Option<&Query> {
 	if !self.initialized {
 	    warn!("Request queries read not initialized");
 	}
 	self.query.iter().find(|query| query.name() == name)
+    }
+
+    pub fn set_query(&mut self, query_name: &str, query_value: &str) {
+	self.initialized = true;
+	if self.query.iter().any(|query| query.name() == query_name) {
+	    let query: &mut Query = self.query.iter_mut().find(|query| query.name() == query_name).unwrap();
+	    query.set_value(query_value.to_string());
+	} else {
+	    self.query.push(Query::new(query_name.to_string(), query_value.to_string()));
+	}
+    }
+
+    pub fn add_query(&mut self, query_name: &str, query_value: &str) {
+	self.initialized = true;
+	if self.query.iter().any(|q| q.name() == query_name) {
+	    self.set_query(query_name, query_value);
+	    return;
+	}
+	self.query.push(Query::new(query_name.to_string(), query_value.to_string()));
     }
 
     pub fn content_type(&self) -> Option<String> {
@@ -201,6 +296,22 @@ impl Request {
 
     pub fn parse_from_str(&mut self, request: &str) {
 	self.parse_request(request.to_string());
+    }
+
+    pub fn build(&self) -> String {
+	let mut lines: Vec<String> = Vec::new();
+	
+	let mut new_path: String = self.path.clone();
+	for query in &self.query {
+	    new_path.push_str(&format!("{}{}={}", if new_path.contains("?") { "&" } else { "?" }, query.name(), query.value()));
+	}
+	
+	lines.push(format!("{} {} {}", self.method, new_path, self.version));
+	for header in &self.headers {
+	    lines.push(format!("{}: {}", header.name(), header.value()));
+	}
+
+	return format!("{}\r\n\r\n{}", lines.join("\r\n"), self.body);
     }
     
     fn parse_request(&mut self, request: String) {
@@ -390,5 +501,20 @@ mod test_request {
 	assert_eq!(request.body(), "body");
 	assert_eq!(*request.method(), Method::POST);
 	assert_eq!(request.path(), "/");
+    }
+
+    #[test]
+    fn test_build() {
+	let mut request: Request = Request::new();
+	request.set_method(Method::POST);
+	request.set_path("/");
+	request.add_header("Host", "localhost");
+	request.add_header("Host", "localhost2");
+	request.set_header("Content-Type", "plain");
+	request.add_query("name", "value");
+	request.add_query("name", "value2");
+	request.set_query("name2", "value");
+	request.set_body("body");
+	assert_eq!(request.build(), "POST /?name=value2&name2=value HTTP/1.1\r\nHost: localhost2\r\nContent-Type: plain\r\n\r\nbody");
     }
 }
