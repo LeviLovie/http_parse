@@ -1,0 +1,8 @@
+[package]
+name = "http_parse"
+version = "1.0.0"
+edition = "2021"
+authors = ["LeviLovie"]
+
+[dependencies]
+log = "0.4.21"
